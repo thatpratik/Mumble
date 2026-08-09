@@ -10,8 +10,11 @@ import SwiftUI
 @main
 struct MumbleApp: App {
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        MenuBarExtra("Mumble", systemImage: "mic.fill") {
+            Button("Quit Mumble") {
+                NSApplication.shared.terminate(nil)
+            }
+            .keyboardShortcut("q")
         }
     }
 }
