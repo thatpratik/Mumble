@@ -31,7 +31,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 0 — Project setup
+## Phase 0 — Project setup - Done
 
 **Goal of this phase:** an empty but running macOS app, tracked in git, before any real feature work.
 
@@ -45,7 +45,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 1 — Menu-bar app shell
+## Phase 1 — Menu-bar app shell - Done
 
 **Goal of this phase:** the app lives in the menu bar (not the Dock, not a window), and can be quit cleanly.
 
