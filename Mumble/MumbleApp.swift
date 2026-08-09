@@ -13,21 +13,6 @@ import Speech
 struct MumbleApp: App {
     var body: some Scene {
         MenuBarExtra("Mumble", systemImage: "mic.fill") {
-            // TEMPORARY debug items for Phase 2 permission testing — remove once verified (step 21).
-            Button("Debug: Request Mic Permission") {
-                AVCaptureDevice.requestAccess(for: .audio) { granted in
-                    print("Mic permission granted: \(granted)")
-                }
-            }
-            Button("Debug: Request Speech Recognition Permission") {
-                SFSpeechRecognizer.requestAuthorization { status in
-                    print("Speech recognition authorization status: \(status.rawValue)")
-                }
-            }
-            Button("Debug: Log Permissions Status") {
-                PermissionsStatus.logCurrentStatus()
-            }
-            Divider()
             Button("Quit Mumble") {
                 NSApplication.shared.terminate(nil)
             }
