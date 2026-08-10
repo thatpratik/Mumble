@@ -20,8 +20,11 @@ struct MumbleApp: App {
         }
     }
 
+    private let hotkeyMonitor = HotkeyMonitor()
+
     init() {
         PermissionsStatus.logCurrentStatus()
+        hotkeyMonitor.start()
     }
 }
 

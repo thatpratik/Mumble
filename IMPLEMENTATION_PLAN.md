@@ -58,7 +58,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 2 — Permissions groundwork
+## Phase 2 — Permissions groundwork - Done
 
 **Goal of this phase:** the app can legally ask macOS for microphone, speech-recognition, and accessibility access — before you wire up any real functionality that needs them.
 
