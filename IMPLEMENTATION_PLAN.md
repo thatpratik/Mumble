@@ -132,17 +132,17 @@ The raw on-device path is never blocked or replaced by a slow/failed network cal
 
 ---
 
-## Phase 4 — Capturing microphone audio — Not started
+## Phase 4 — Capturing microphone audio — Code done, manual verification pending
 
 **Goal of this phase:** raw audio flows from the mic into your app for the duration Fn is held, with no speech recognition yet — just prove the plumbing.
 
-27. **Create an `AVAudioEngine` instance** owned by a new `AudioCapture` class.
-28. **Install a tap on `audioEngine.inputNode`** with a reasonable buffer size (e.g. 1024 frames), using the input node's native format.
-29. **Inside the tap closure, just log the buffer's `frameLength`** for now — don't process the audio yet. This confirms audio is actually flowing.
-30. **Wire "Fn DOWN" (from Phase 3b's coordinator) to call `audioEngine.start()`**, wrapped in a `do/catch` since starting can throw.
-31. **Wire "Fn UP" to call `audioEngine.stop()` and remove the tap.**
-32. **Test: hold Fn, speak, release Fn.** Verify: console logs a steady stream of buffer sizes while Fn is held, and stops immediately when released. If nothing logs, re-check microphone permission (step 17).
-33. **Test the rapid-tap edge case**: press and release Fn very quickly. Verify: no crash from starting/stopping the engine in quick succession (add a guard so `stop()` isn't called on an already-stopped engine, and vice versa).
+27. **Create an `AVAudioEngine` instance** owned by a new `AudioCapture` class. — Done: `Mumble/AudioCapture.swift`, behind an `AudioCapturing` protocol so `DictationController` can be unit-tested without real audio hardware.
+28. **Install a tap on `audioEngine.inputNode`** with a reasonable buffer size (e.g. 1024 frames), using the input node's native format. — Done.
+29. **Inside the tap closure, just log the buffer's `frameLength`** for now — don't process the audio yet. This confirms audio is actually flowing. — Done.
+30. **Wire "Fn DOWN" (from Phase 3b's coordinator) to call `audioEngine.start()`**, wrapped in a `do/catch` since starting can throw. — Done, via `DictationController.handleFnDown()` calling `audioCapture.start()`. `isListening` only flips to `true` if `start()` actually succeeds (a real bug caught before commit: without this, a denied mic permission would leave the controller thinking it was listening while no audio ever flowed — see the negative test suite below).
+31. **Wire "Fn UP" to call `audioEngine.stop()` and remove the tap.** — Done.
+32. **Test: hold Fn, speak, release Fn.** Verify: console logs a steady stream of buffer sizes while Fn is held, and stops immediately when released. If nothing logs, re-check microphone permission (step 17). — **Not yet done.** No Xcode install available in this environment (Command Line Tools only, confirmed via `xcode-select -p`), so this needs a real build + physical mic test from you.
+33. **Test the rapid-tap edge case**: press and release Fn very quickly. Verify: no crash from starting/stopping the engine in quick succession (add a guard so `stop()` isn't called on an already-stopped engine, and vice versa). — Guard clauses in place at both `AudioCapture` (`isRunning`) and `DictationController` (`isListening`) levels. Verified via an executable test harness (compiled and run with plain `swiftc` against the real source files, since no Xcode test target exists yet): rapid repeated `handleFnDown()`/`handleFnUp()` calls each trigger exactly one `start()`/`stop()`, and a failed `start()` never triggers a stray `stop()`. Same cases are committed as `MumbleTests/DictationControllerTests.swift` (XCTest) for when a test target exists — see that file's header for how to wire it in. Physical rapid-tap-on-real-hardware test still pending, same as step 32.
 34. **Commit this checkpoint** ("Microphone audio capture wired to Fn key").
 
 ---
