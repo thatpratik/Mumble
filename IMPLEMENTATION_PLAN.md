@@ -147,20 +147,20 @@ The raw on-device path is never blocked or replaced by a slow/failed network cal
 
 ---
 
-## Phase 5 — On-device speech recognition — Not started
+## Phase 5 — On-device speech recognition — Code done, manual verification pending
 
 **Goal of this phase:** the raw audio from Phase 4 becomes real English text, still only visible in the console.
 
-35. **Create an `SFSpeechRecognizer(locale: Locale(identifier: "en-US"))` instance**, and check `recognizer.isAvailable` before using it.
-36. **Confirm on-device recognition is possible**: check `recognizer.supportsOnDeviceRecognition`. If needed, set `request.requiresOnDeviceRecognition = true` later so no audio ever leaves the machine (this matches the offline decision in `Project.md`).
-37. **Create an `SFSpeechAudioBufferRecognitionRequest`** when Fn goes down, right before starting the audio engine.
-38. **In the audio tap closure from step 29, call `request.append(buffer)`** instead of just logging frame length — this feeds real audio into the recognizer.
-39. **Start a recognition task**: `recognizer.recognitionTask(with: request) { result, error in ... }`, logging `result?.bestTranscription.formattedString` on every callback (it fires repeatedly with partial results while you speak).
-40. **Test: hold Fn, say a full sentence, release Fn.** Verify: console shows the transcript building up incrementally as you speak (partial results), ending with a stable final version.
-41. **On Fn UP, call `request.endAudio()`** so the recognizer knows no more audio is coming, and capture the *last* result as the final transcript.
-42. **Handle the "task already finished" and "no speech detected" cases** gracefully (e.g. empty transcript on a very short Fn tap with no words spoken) — just log a message, don't crash.
-43. **Test punctuation words explicitly**: say "hello comma world period" and confirm the built-in recognizer renders them as `Hello, world.` (validates the Phase-2-of-Project.md decision to rely on Apple's built-in punctuation rather than a custom vocabulary).
-44. **Commit this checkpoint** ("End-to-end speech-to-text in console, no typing yet").
+35. **Create an `SFSpeechRecognizer(locale: Locale(identifier: "en-US"))` instance**, and check `recognizer.isAvailable` before using it. — Done: `Mumble/SpeechTranscriber.swift`, behind a `SpeechTranscribing` protocol (same testability pattern as `AudioCapturing`).
+36. **Confirm on-device recognition is possible**: check `recognizer.supportsOnDeviceRecognition`. If needed, set `request.requiresOnDeviceRecognition = true` later so no audio ever leaves the machine (this matches the offline decision in `Project.md`). — Done.
+37. **Create an `SFSpeechAudioBufferRecognitionRequest`** when Fn goes down, right before starting the audio engine. — Done: `DictationController.handleFnDown()` calls `speechTranscriber.start(...)` before wiring `audioCapture.onBuffer` and calling `audioCapture.start()`.
+38. **In the audio tap closure from step 29, call `request.append(buffer)`** instead of just logging frame length — this feeds real audio into the recognizer. — Done: `AudioCapture` now exposes an `onBuffer` closure (replacing the Phase 4 frame-length log) that `DictationController` wires straight to `speechTranscriber.append(_:)`.
+39. **Start a recognition task**: `recognizer.recognitionTask(with: request) { result, error in ... }`, logging `result?.bestTranscription.formattedString` on every callback (it fires repeatedly with partial results while you speak). — Done.
+40. **Test: hold Fn, say a full sentence, release Fn.** Verify: console shows the transcript building up incrementally as you speak (partial results), ending with a stable final version. — **Not yet done.** Same Xcode/hardware gap as Phase 4 — needs a real build and a real microphone.
+41. **On Fn UP, call `request.endAudio()`** so the recognizer knows no more audio is coming, and capture the *last* result as the final transcript. — Done, with one deliberate correctness detail: the final transcript is captured from the recognition task's own asynchronous callback (`result.isFinal` or `error`), *not* read synchronously right after `endAudio()` — the real final result can arrive after `handleFnUp()` has already returned, so grabbing "whatever's latest" at `endAudio()` time would race and could hand back a stale partial. Verified via the executable harness: `onFinal` fires and updates `lastTranscript` correctly even when invoked after `handleFnUp()` returns.
+42. **Handle the "task already finished" and "no speech detected" cases** gracefully (e.g. empty transcript on a very short Fn tap with no words spoken) — just log a message, don't crash. — Done: both the `error` branch of the recognition callback and the "recognizer unavailable" guard log and resolve gracefully instead of crashing; a `didFinish` guard makes the finish path idempotent (result-then-error or repeated callbacks can't double-fire it).
+43. **Test punctuation words explicitly**: say "hello comma world period" and confirm the built-in recognizer renders them as `Hello, world.` (validates the Phase-2-of-Project.md decision to rely on Apple's built-in punctuation rather than a custom vocabulary). — **Not yet done** — needs real speech input, same gap as step 40.
+44. **Commit this checkpoint** ("End-to-end speech-to-text in console, no typing yet"). Negative cases (audio-capture failure cleaning up a dangling speech request, buffer forwarding via a real `AVAudioPCMBuffer`, async final-transcript delivery, rapid double down/up) verified via the same `swiftc`-harness-against-real-sources technique as Phase 4, and committed as more `MumbleTests/DictationControllerTests.swift` cases.
 
 ---
 
