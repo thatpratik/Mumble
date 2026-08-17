@@ -21,9 +21,14 @@ struct MumbleApp: App {
     }
 
     private let hotkeyMonitor = HotkeyMonitor()
+    private let dictationController = DictationController()
 
     init() {
         PermissionsStatus.logCurrentStatus()
+
+        let controller = dictationController
+        hotkeyMonitor.onFnDown = { controller.handleFnDown() }
+        hotkeyMonitor.onFnUp = { controller.handleFnUp() }
         hotkeyMonitor.start()
     }
 }
