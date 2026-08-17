@@ -120,15 +120,15 @@ The raw on-device path is never blocked or replaced by a slow/failed network cal
 
 `HotkeyMonitor.swift` implements steps 22-25 correctly (debounced `onFnDown`/`onFnUp` closures). However, `MumbleApp.swift` calls `hotkeyMonitor.start()` but never assigns either closure — so nothing outside `HotkeyMonitor` itself currently reacts to Fn events. The commit for step 26 landed, but the checkpoint isn't functionally complete. Close this properly in Phase 3b before moving on.
 
-### Phase 3b — Close the Fn-key wiring gap — Not started
+### Phase 3b — Close the Fn-key wiring gap — Code done, manual verification pending
 
 **Goal of this phase:** make Fn down/up actually drive app behavior, and clean up leftover template code, before building audio capture on top of it.
 
-26a. **Introduce a small coordinator** (e.g. `DictationController`) rather than inlining logic into `MumbleApp.init()` — Phase 4-6 will need to hang `AudioCapture` and `SFSpeechRecognizer` state off the same down/up events, so it's cheaper to introduce the right shape now than refactor mid-Phase-5.
-26b. **Assign `hotkeyMonitor.onFnDown`/`onFnUp`** in `MumbleApp.swift`'s `init()` to call into the new coordinator (even if the coordinator just logs for now — the point is closing the wiring gap).
-26c. **Delete `ContentView.swift`** — dead template code, unreferenced since Phase 1 removed the `WindowGroup`.
-26d. **Verify**: same manual test as step 24/25, but now confirm the *coordinator* (not just `HotkeyMonitor`'s internal print) receives the down/up events.
-26e. **Commit this checkpoint** ("Wire Fn key events to dictation controller").
+26a. **Introduce a small coordinator** (e.g. `DictationController`) rather than inlining logic into `MumbleApp.init()` — Phase 4-6 will need to hang `AudioCapture` and `SFSpeechRecognizer` state off the same down/up events, so it's cheaper to introduce the right shape now than refactor mid-Phase-5. — Done: `Mumble/DictationController.swift`, guards against redundant down/up calls via an `isListening` flag.
+26b. **Assign `hotkeyMonitor.onFnDown`/`onFnUp`** in `MumbleApp.swift`'s `init()` to call into the new coordinator (even if the coordinator just logs for now — the point is closing the wiring gap). — Done.
+26c. **Delete `ContentView.swift`** — dead template code, unreferenced since Phase 1 removed the `WindowGroup`. — Done, verified with a repo-wide grep for `ContentView` finding no remaining references before deleting.
+26d. **Verify**: same manual test as step 24/25, but now confirm the *coordinator* (not just `HotkeyMonitor`'s internal print) receives the down/up events. — **Not yet done.** No Xcode install was available in the environment that made this change (only Command Line Tools), so the change is code-reviewed but not compiled or run. Needs: build in Xcode, hold Fn while a different app is focused, confirm `DictationController: listening started`/`listening stopped` print, confirm rapid taps don't double-fire (mirrors step 25's edge case, now one level up the call chain).
+26e. **Commit this checkpoint.** — Done, as three separate commits: add `DictationController`, wire the callbacks, remove `ContentView.swift`.
 
 ---
 
