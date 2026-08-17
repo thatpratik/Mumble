@@ -1,8 +1,22 @@
-# Mumble — Implementation Plan (MVP)
+# Mumble — Implementation Plan
 
-This is a deliberately slow, granular, step-by-step build plan for the Mac-only MVP described in `Project.md`. Each step is small enough to do in one sitting, has a clear goal, an action, and a way to verify it worked before moving to the next step. Don't skip ahead — each phase builds on a verified previous one.
+This plan is deliberately slow and granular for the local, offline dictation loop (Phases 0-6b), then shifts to architectural/directional phases once the project starts pulling in a backend and AI layer (Phase 7 onward). Don't skip ahead — each phase builds on a verified previous one.
+
+## Status / Product Direction
+
+Mumble started as a purely personal, fully-offline Mac dictation MVP (Fn-key push-to-talk → on-device `SFSpeechRecognizer` → `CGEvent` keystroke injection, no network calls at all).
+
+After reviewing two new planning documents (`Voice_AI_Developer_Assistant_Product_Description.docx` and `Voice_AI_Developer_Assistant_Implementation_Plan.docx`) describing a larger commercial "Voice AI Developer Assistant" product, the direction has been updated (2026-08-18):
+
+- **Pivoting toward the full product vision**: a FastAPI/PostgreSQL/Redis backend, an eventual Next.js web dashboard, auth/billing groundwork, and a monorepo layout — building toward a real (if still solo-used today) product rather than staying a single-file local tool forever.
+- **Deliberate deviation from the source docs: speech-to-text stays on-device.** The new docs recommend hosted STT from the start; Mumble keeps `SFSpeechRecognizer` on-device instead, for latency, offline capability, and because it's already validated. This is a conscious choice, not an oversight — don't "fix" it back to hosted STT without a new decision to do so.
+- **AI cleanup/transformation is added *after* the on-device loop is finished**, and is routed through the new backend (never called directly from the Swift client, so API keys never live on the client).
+
+Phases 0-6 below are the original offline MVP plan, unchanged in content and still the right next steps. Phase 7 onward is new, mapped from the two docs' roadmap onto this codebase.
 
 ## Architecture at a glance
+
+**Local loop (Phases 0-6, unchanged):**
 
 ```
    [Fn key held down]
@@ -27,11 +41,32 @@ This is a deliberately slow, granular, step-by-step build plan for the Mac-only 
                                                      app currently has focus
 ```
 
-Five moving parts, five phases: **menu-bar shell → permissions → key detection → audio + speech → text injection**. Everything after that is wiring and polish.
+**Extended pipeline once the backend exists (from Phase 8 on):**
+
+```
+                          final transcript (String)
+                                    |
+                    +---------------+----------------+
+                    |                                 |
+                    v                                 v
+          typeText(...) immediately         (optional) POST /v1/transform
+          — instant, unchanged default        transcript + mode --> services/api
+                    |                                 |
+                    v                                 v
+        Text appears in focused app        Claude/OpenAI (provider-abstracted)
+                                                        |
+                                                        v
+                                          transformed_text replaces/appends
+                                          the typed text, IF the round trip
+                                          succeeds in time — otherwise the
+                                          raw transcript already typed stands.
+```
+
+The raw on-device path is never blocked or replaced by a slow/failed network call — AI cleanup is an enhancement, not a dependency.
 
 ---
 
-## Phase 0 — Project setup - Done
+## Phase 0 — Project setup — Done
 
 **Goal of this phase:** an empty but running macOS app, tracked in git, before any real feature work.
 
@@ -45,7 +80,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 1 — Menu-bar app shell - Done
+## Phase 1 — Menu-bar app shell — Done
 
 **Goal of this phase:** the app lives in the menu bar (not the Dock, not a window), and can be quit cleanly.
 
@@ -58,7 +93,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 2 — Permissions groundwork - Done
+## Phase 2 — Permissions groundwork — Done
 
 **Goal of this phase:** the app can legally ask macOS for microphone, speech-recognition, and accessibility access — before you wire up any real functionality that needs them.
 
@@ -73,7 +108,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 3 — Detecting the Fn key globally
+## Phase 3 — Detecting the Fn key globally — Code done, wiring incomplete (see Phase 3b)
 
 **Goal of this phase:** know the instant Fn is pressed and released, even when Mumble isn't the focused app — with no audio or speech recognition involved yet.
 
@@ -83,16 +118,28 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 25. **Handle the edge case of holding Fn for a long time vs. a quick tap** — confirm your down/up tracking doesn't double-fire. Verify: holding Fn for 5 seconds logs exactly one "Fn DOWN" and, on release, exactly one "Fn UP".
 26. **Commit this checkpoint** ("Global Fn key detection working").
 
+`HotkeyMonitor.swift` implements steps 22-25 correctly (debounced `onFnDown`/`onFnUp` closures). However, `MumbleApp.swift` calls `hotkeyMonitor.start()` but never assigns either closure — so nothing outside `HotkeyMonitor` itself currently reacts to Fn events. The commit for step 26 landed, but the checkpoint isn't functionally complete. Close this properly in Phase 3b before moving on.
+
+### Phase 3b — Close the Fn-key wiring gap — Not started
+
+**Goal of this phase:** make Fn down/up actually drive app behavior, and clean up leftover template code, before building audio capture on top of it.
+
+26a. **Introduce a small coordinator** (e.g. `DictationController`) rather than inlining logic into `MumbleApp.init()` — Phase 4-6 will need to hang `AudioCapture` and `SFSpeechRecognizer` state off the same down/up events, so it's cheaper to introduce the right shape now than refactor mid-Phase-5.
+26b. **Assign `hotkeyMonitor.onFnDown`/`onFnUp`** in `MumbleApp.swift`'s `init()` to call into the new coordinator (even if the coordinator just logs for now — the point is closing the wiring gap).
+26c. **Delete `ContentView.swift`** — dead template code, unreferenced since Phase 1 removed the `WindowGroup`.
+26d. **Verify**: same manual test as step 24/25, but now confirm the *coordinator* (not just `HotkeyMonitor`'s internal print) receives the down/up events.
+26e. **Commit this checkpoint** ("Wire Fn key events to dictation controller").
+
 ---
 
-## Phase 4 — Capturing microphone audio
+## Phase 4 — Capturing microphone audio — Not started
 
 **Goal of this phase:** raw audio flows from the mic into your app for the duration Fn is held, with no speech recognition yet — just prove the plumbing.
 
 27. **Create an `AVAudioEngine` instance** owned by a new `AudioCapture` class.
 28. **Install a tap on `audioEngine.inputNode`** with a reasonable buffer size (e.g. 1024 frames), using the input node's native format.
 29. **Inside the tap closure, just log the buffer's `frameLength`** for now — don't process the audio yet. This confirms audio is actually flowing.
-30. **Wire "Fn DOWN" (from Phase 3) to call `audioEngine.start()`**, wrapped in a `do/catch` since starting can throw.
+30. **Wire "Fn DOWN" (from Phase 3b's coordinator) to call `audioEngine.start()`**, wrapped in a `do/catch` since starting can throw.
 31. **Wire "Fn UP" to call `audioEngine.stop()` and remove the tap.**
 32. **Test: hold Fn, speak, release Fn.** Verify: console logs a steady stream of buffer sizes while Fn is held, and stops immediately when released. If nothing logs, re-check microphone permission (step 17).
 33. **Test the rapid-tap edge case**: press and release Fn very quickly. Verify: no crash from starting/stopping the engine in quick succession (add a guard so `stop()` isn't called on an already-stopped engine, and vice versa).
@@ -100,7 +147,7 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 5 — On-device speech recognition
+## Phase 5 — On-device speech recognition — Not started
 
 **Goal of this phase:** the raw audio from Phase 4 becomes real English text, still only visible in the console.
 
@@ -117,9 +164,9 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 6 — Typing the result into the focused app
+## Phase 6 — Typing the result into the focused app — Not started
 
-**Goal of this phase:** the final transcript from Phase 5 gets physically typed into whatever app the user was looking at — the actual "magic" of the product.
+**Goal of this phase:** the final transcript from Phase 5 gets physically typed into whatever app the user was looking at — the actual "magic" of the product, and the point at which the raw dictation loop is feature-complete.
 
 45. **Write a `typeText(_ text: String)` function** using `CGEvent(keyboardEventSource:virtualKey:keyDown:)` with `CGEventKeyboardSetUnicodeString` to post each character as a synthetic keystroke to the system (not to a specific app — it goes to whatever has focus).
 46. **Guard the function on `AXIsProcessTrusted()`** — if false, skip typing and log a warning instead of silently failing.
@@ -131,38 +178,137 @@ Five moving parts, five phases: **menu-bar shell → permissions → key detecti
 
 ---
 
-## Phase 7 — Minimal UX polish (still MVP, not extra features)
+## Phase 6b — Minimal UX polish (cheap parts only) — Not started
 
-**Goal of this phase:** make the app usable day-to-day without adding new capabilities.
+**Goal of this phase:** small, low-cost usability wins that don't require the backend/monorepo work below. The rest of the old polish/packaging plan (Applications-folder packaging, distribution signing, Login Items) is deferred — see "Deferred" section at the end — until distributing to more than one user is actually relevant.
 
 52. **Change the menu-bar icon while listening** (e.g. swap `mic` → `mic.fill` or change its color) so there's visible feedback that Fn is being held and Mumble is recording. Verify: icon visibly changes state on Fn down/up.
 53. **Add a "Permissions" menu item** that opens `System Settings` directly to the Accessibility pane (via `NSWorkspace.shared.open` with the appropriate `x-apple.systempreferences:` URL), for when permissions haven't been granted yet.
 54. **Add basic guard rails**: if microphone or speech-recognition permission is missing when Fn is pressed, skip the recording flow entirely and just flash/log a clear message rather than crashing or silently doing nothing.
 55. **Manually test the "cold start" experience**: quit the app, revoke all three permissions in System Settings, relaunch, and press Fn. Verify: the app clearly indicates what's missing instead of failing silently.
 
----
-
-## Phase 8 — Packaging for personal daily use
-
-**Goal of this phase:** you can quit Xcode and just use the built app like a real tool.
-
-56. **Set up code signing** with your personal Apple ID (Signing & Capabilities → Team). Ad-hoc/personal signing is fine for a learning project not going through the App Store.
-57. **Build a Release configuration** (`Product → Archive` or a Release build), and locate the resulting `.app` bundle.
-58. **Copy the built `.app` to `/Applications` (or `~/Applications`)** and launch it directly, outside Xcode. Verify: permissions you granted earlier still apply (macOS ties them to the app's bundle identity + signature, so re-signing differently may require re-granting).
-59. **Optionally add it to Login Items** (`System Settings → General → Login Items`) so it starts automatically. Verify: after a reboot/logout, Mumble's menu-bar icon appears without manually launching it.
+**Exit criterion for the local loop (Phases 0-6b):** dictation works end-to-end, entirely offline, in TextEdit, a code editor, and Terminal. This should be in real daily use before Phase 7 starts — enforce a hard rule: **no backend code until the on-device loop has been used for real dictation outside Xcode debug mode.**
 
 ---
 
-## Phase 9 — Close the loop with the docs
+## Phase 7 — Monorepo restructure — Not started
 
-**Goal of this phase:** the repo's docs catch up to the fact that real code now exists.
+**Goal of this phase:** move the existing Xcode project into a monorepo layout (`apps/macos-agent/`) as an isolated, independently verified commit with zero logic changes, in preparation for the backend work in Phase 8. Deliberately sequenced *after* Phases 4-6b, not before — restructuring a working-but-unfinished loop would conflate "did the move break the build" with "did the feature break," and the monorepo buys nothing until Phase 8 needs sibling directories.
 
-60. **Update `CLAUDE.md`** with real, working build/run commands (e.g. `xcodebuild -project Mumble.xcodeproj -scheme Mumble build`, or the plain Xcode GUI steps) and a short architecture section pointing at the five-phase pipeline above.
-61. **Update `Project.md`'s "Open questions" section** with whatever you actually decided while building (e.g. what the Accessibility onboarding message says, whether you added Login Items, what happens on recognizer failure).
-62. **Commit a final MVP checkpoint** ("Mumble MVP: push-to-talk dictation working end-to-end").
+56. **Close Xcode** before moving any files.
+57. **Move the project as a unit**: `git mv Mumble.xcodeproj Mumble apps/macos-agent/`. The project uses the modern file-system-synchronized format (`PBXFileSystemSynchronizedRootGroup`, not per-file `PBXFileReference`s), so the source folder is referenced as one relative-path group rather than individually enumerated files — this move should need little to no manual `.pbxproj` editing, but verify rather than assume.
+58. **Re-open `apps/macos-agent/Mumble.xcodeproj` directly** (not via a stale Recents entry) so Xcode re-resolves paths from the new location.
+59. **Create and commit a shared Xcode scheme** (Product → Scheme → Manage Schemes → check "Shared" for Mumble) — there isn't one yet, and it's required for any non-interactive build (this phase's own verification step, and any future CI) regardless of the monorepo move.
+60. **Verify the build from the command line**: `xcodebuild -project apps/macos-agent/Mumble.xcodeproj -scheme Mumble build` from the repo root succeeds.
+61. **Clear stale `~/Library/Developer/Xcode/DerivedData/Mumble-*`** locally (not a repo operation) so no cached path state lingers, then run the app from Xcode.
+62. **Re-verify permissions**: explicitly re-check `AXIsProcessTrusted()`, microphone, and speech-recognition permission state after the move — these key off bundle ID + signature so should survive, but don't assume; this exact "silently does nothing without Accessibility" class of failure already applied to Phase 3.
+63. **Run the full Phase 6 end-to-end test again** (TextEdit, code editor, Terminal) from the new location to confirm nothing broke.
+64. **Commit the move alone**, with no other changes mixed in, so any later build break is trivially bisectable to this commit. ("Move Mumble.xcodeproj into apps/macos-agent/ (monorepo restructure)").
+
+**Scaffolding principle for everything below:** create each of `apps/web`, `services/api`, `services/ai`, `packages/contracts`, `packages/prompts`, `infra`, `docs` **lazily** — with a real minimal first artifact, not a placeholder — in the commit that starts the phase that actually needs it. Empty scaffolds for a solo project rot before they're used (wrong schema guesses, stale lockfiles, dead CI configs). Extend `.gitignore` incrementally in the same commit each new toolchain is introduced (`__pycache__/`, `.venv/`, `node_modules/`, `.next/`), not speculatively upfront. Keep Python/Node siblings tied together by git/CI only — do not fold them into the `.xcworkspace`; Xcode doesn't need to know they exist.
+
+---
+
+## Phase 8 — AI Text Transformation (backend introduction) — Not started
+
+**Goal of this phase:** stand up the smallest possible backend that can turn a raw transcript into cleaned-up text, without over-building infrastructure ahead of need.
+
+- **Create `services/api`** (FastAPI) with one real endpoint: `POST /v1/transform`.
+  - Request: `{ transcript: string, mode: "normal" | "professional" | "concise" }`. No `context` field yet — added in Phase 9, don't plumb an unused field now.
+  - Response: `{ transformed_text: string, latency_ms: number, model: string }`.
+  - Behind a provider abstraction so the backend can call Claude and/or OpenAI without the caller caring which.
+  - `POST /v1/transcriptions` is **permanently out of scope** — STT stays on-device by design (see Status section above). Don't build it "for completeness."
+- **Auth**: one static bearer token, generated once, stored in the Mac client's Keychain, checked against a single backend-side value via an env var. This is deliberately not real multi-user auth — see the auth note below.
+- **Secrets**: the Claude/OpenAI API key lives only in `services/api`'s environment/secrets — never in the Swift client, `Info.plist`, or git history. `.env` is gitignored from its very first commit in this phase.
+- **No Postgres, no Redis** in this first cut. Add Postgres only once there's something worth persisting (e.g. a `UsageEvent` log). Add Redis only once rate-limiting/caching is actually needed (per the risk note below, likely once cost-per-request starts mattering).
+- **Client integration**: after on-device STT produces a transcript (Phase 5-6), `typeText` the raw transcript immediately as today — that instant path never changes. Treat AI cleanup as an **opt-in/toggleable enhancement**: if enabled, fire the `/v1/transform` request, and if it returns in time, replace/append the cleaned text; if it fails or times out, the raw transcript that's already typed simply stands. Never block the hot path on the network call.
+- **Auth/multi-user shape**: once Postgres exists (triggered by the first real persistence need, not this phase necessarily), model a minimal `users` table (`id`, `email`, `api_token_hash`, `created_at`) with exactly one seeded row (your own account) — so the code already reads "look up user by token" rather than "compare against a constant." This makes a future real-auth swap additive rather than a rewrite. Don't integrate a managed auth provider or build login/signup until `apps/web` exists (Phase 12+).
+- **Verify**: call `/v1/transform` with `curl` first to confirm the backend works standalone, then verify the opt-in client path end-to-end (toggle on, dictate, see cleaned text appear; toggle off or kill the backend, confirm raw transcript still appears with no crash/hang).
+
+---
+
+## Phase 9 — Context Engine — Not started
+
+**Goal of this phase:** give `/v1/transform` real context to work with, and add the first native settings surface.
+
+- Detect active application (and window/document metadata where permitted).
+- Populate `/v1/transform`'s `context` field (now added): application, language/file metadata where available, user preferences.
+- Support explicit selected-text transformations (user asks for a transform on text they've selected, not just the last dictation).
+- Define privacy boundaries: collect only what's needed for the requested transformation, and make it transparent.
+- **First point that justifies a native SwiftUI settings window** — per-application opt-out of context collection/AI cleanup. No `apps/web` needed for this phase.
+
+---
+
+## Phase 10 — Developer Mode — Not started
+
+**Goal of this phase:** technical accuracy in transformed output, and versioned, evaluable prompts.
+
+- Preserve camelCase, PascalCase, snake_case, kebab-case, CLI syntax, and code identifiers through transformation.
+- Add developer-vocabulary handling (language/framework/tool terms relevant to your own work).
+- Add structured developer-prompt generation and code-oriented formatting (e.g. an "AI coding prompt" mode).
+- **First phase that justifies creating `packages/prompts`** — versioned prompt templates plus an evaluation dataset of representative utterances, so prompt changes can be checked for regressions. No `apps/web` needed.
+- Design rule carried over from the source docs: the AI must not invent facts or silently change technical meaning.
+
+---
+
+## Phase 11 — AI Commands — Not started
+
+**Goal of this phase:** named, explicit transformations beyond passive cleanup.
+
+- Add `/v1/commands/execute` (or a `command` parameter on `/v1/transform` — decide based on how different the request/response shapes end up being once Phase 10's prompt work exists).
+- Seed with a small set of genuinely useful commands for your own workflow (e.g. "make this professional," "summarize this," "create a commit message," "explain this code") rather than the full list from the source docs — add more only as you actually want them.
+- Invoke via a second hotkey or menu item (distinct from the default dictation Fn key). No `apps/web` needed.
+
+---
+
+## Phase 12 — Personal Intelligence — Not started
+
+**Goal of this phase:** persistent personalization, and the first justified use of a web UI.
+
+- Personal dictionary (`/v1/dictionary`): names, products, technologies, domain-specific terms.
+- Snippets (`/v1/snippets`) and style/application preferences (`/v1/profile`).
+- **First phase that justifies creating `apps/web`** (Next.js) — CRUD management for dictionary/snippets/preferences fits a web UI far better than a native pane, and this is the first real use of Postgres beyond the single-row `users` table from Phase 8.
+- **First real use of `packages/contracts`** if by this point both the Swift client and `apps/web` need the same generated request/response types — not before.
+
+---
+
+## Phase 13 — Voice-to-Action Foundation — Not started
+
+**Goal of this phase:** the first executable (not just textual) voice actions, gated carefully.
+
+- Introduce explicit command detection, separated clearly from passive text transformations.
+- Add an action registry with permissions.
+- **Security principle (non-negotiable, carried verbatim from the source docs): voice should never silently execute destructive operations.** Actions such as deleting, pushing, merging, or sending require explicit confirmation unless the user has deliberately configured an approved automation.
+- Add audit logging for actions (this is where `apps/web`'s audit-log review becomes useful, though not required to prototype execution itself).
+- **Do not start this phase until the core dictation + AI loop has been in real daily use and feels reliable** — this is the highest-risk phase (accidental destructive actions from misrecognition) and should be built on a proven-solid foundation, not concurrently with it.
+
+---
+
+## Key risks (carried and extended from the original plan)
+
+- **Scope creep**: no backend code before Phase 7's exit criterion (real daily use of the offline loop) is met.
+- **Latency/coherence break**: Phase 8 adds a network+LLM round trip to a previously instant, fully local pipeline. Mitigated by keeping AI cleanup strictly opt-in/enhancement, never blocking the raw-transcript hot path.
+- **Cross-application text insertion reliability** (unchanged from original plan — still validated per-app in Phase 6).
+- **Speech recognition errors for technical terminology** — addressed incrementally in Phase 10, not before.
+- **AI transformation changing technical meaning** — the non-invention design rule in Phase 10 exists specifically to guard against this.
+- **Xcode/monorepo tooling friction**: Xcode doesn't care about sibling Node/Python directories as long as its own relative paths stay internally consistent (low risk given the file-system-synchronized project format) — but don't fold Python/Node into the `.xcworkspace`; keep them tied together by git/CI only.
+- **Contract drift** before `packages/contracts` exists (Phase 12): keep `/v1/transform`'s request/response shape documented in one place both the Swift client and backend reference.
+- **Secret handling**: `.env` gitignored from its first commit (Phase 8); LLM API keys never touch the Swift bundle or git history.
+- **Permission re-grant risk after the Phase 7 move**: explicitly re-verified in step 62, not assumed.
+- **LLM/API cost at scale** — the reason Redis-based rate-limiting is deferred until it's actually needed (Phase 8 note), not built speculatively.
+- **Voice commands accidentally triggering actions** — the reason Phase 13 requires explicit confirmation and is sequenced last.
 
 ---
 
 ## What's deliberately NOT in this plan
 
-Per `Project.md`'s "Explicitly deferred" section, none of the following belong in the MVP and should not sneak in while you're building: Windows support, cloud/LLM-based transcription, a custom punctuation/command vocabulary, non-English languages, a settings window, or auto-updates. If you find yourself tempted to add one of these mid-build, stop and add it to `Project.md`'s deferred list instead — the whole point of this plan is to ship the smallest working loop first.
+- iOS and Android applications.
+- Windows client (still a stated long-term goal in `CLAUDE.md`, but not part of this plan).
+- Enterprise SSO and administration; team dictionaries.
+- Stripe/billing — explicitly deferred until monetization is a real question, not a groundwork item to build now.
+- Broad multi-language support (English only, as in the original MVP).
+- Custom speech model training.
+- **Hosted speech-to-text** — a deliberate, documented deviation from the source docs, not an oversight. Revisit only via an explicit new decision, not by default drift.
+- Applications-folder packaging, distribution code signing, and Login Items — still valid future work (see old Phase 8 of the original plan for the mechanics), but deferred until distributing to more than one user is actually relevant.
+
+If you find yourself tempted to add one of these mid-build, stop and note it here instead — the point of this plan is to keep shipping the smallest next real increment.
