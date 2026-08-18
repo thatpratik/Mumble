@@ -11,17 +11,23 @@ import Speech
 
 @main
 struct MumbleApp: App {
+    @StateObject private var dictationController = DictationController()
+    private let hotkeyMonitor = HotkeyMonitor()
+
     var body: some Scene {
-        MenuBarExtra("Mumble", systemImage: "mic.fill") {
+        MenuBarExtra("Mumble", systemImage: dictationController.isListening ? "mic.fill" : "mic") {
+            Button("Permissions…") {
+                PermissionsStatus.openAccessibilitySettings()
+            }
+
+            Divider()
+
             Button("Quit Mumble") {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
         }
     }
-
-    private let hotkeyMonitor = HotkeyMonitor()
-    private let dictationController = DictationController()
 
     init() {
         PermissionsStatus.logCurrentStatus()
@@ -46,6 +52,17 @@ enum PermissionsStatus {
         Accessibility trusted: \(accessibilityTrusted)
         ---------------------------
         """)
+    }
+
+    /// Opens straight to the Accessibility pane rather than System Settings'
+    /// front page - this is undocumented but confirmed still valid in
+    /// Ventura/Sonoma/Sequoia's System Settings redesign, not just old
+    /// System Preferences (Accessibility has no programmatic permission
+    /// request, per IMPLEMENTATION_PLAN.md step 19, so a direct deep link
+    /// is the only shortcut available).
+    static func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
+        NSWorkspace.shared.open(url)
     }
 }
 

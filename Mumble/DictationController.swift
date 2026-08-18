@@ -3,28 +3,36 @@
 //  Mumble
 //
 
+import Combine
 import Foundation
 
-final class DictationController {
-    private(set) var isListening = false
+final class DictationController: ObservableObject {
+    @Published private(set) var isListening = false
     private(set) var lastTranscript = ""
 
     private let audioCapture: AudioCapturing
     private let speechTranscriber: SpeechTranscribing
     private let textTyper: TextTyping
+    private let permissionsChecker: PermissionsChecking
 
     init(
         audioCapture: AudioCapturing = AudioCapture(),
         speechTranscriber: SpeechTranscribing = SpeechTranscriber(),
-        textTyper: TextTyping = TextTyper()
+        textTyper: TextTyping = TextTyper(),
+        permissionsChecker: PermissionsChecking = PermissionsChecker()
     ) {
         self.audioCapture = audioCapture
         self.speechTranscriber = speechTranscriber
         self.textTyper = textTyper
+        self.permissionsChecker = permissionsChecker
     }
 
     func handleFnDown() {
         guard !isListening else { return }
+        guard permissionsChecker.canRecord else {
+            print("DictationController: missing microphone or speech-recognition permission, skipping")
+            return
+        }
 
         speechTranscriber.start(
             onUpdate: { transcript in

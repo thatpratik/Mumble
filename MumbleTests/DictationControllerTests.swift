@@ -62,10 +62,14 @@ final class FakeTextTyper: TextTyping {
     }
 }
 
+final class FakePermissionsChecker: PermissionsChecking {
+    var canRecord = true
+}
+
 final class DictationControllerTests: XCTestCase {
     func test_fnDown_startsListening_whenAudioCaptureSucceeds() {
         let fakeAudio = FakeAudioCapture()
-        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: FakeSpeechTranscriber(), textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: FakeSpeechTranscriber(), textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
 
         controller.handleFnDown()
 
@@ -76,7 +80,7 @@ final class DictationControllerTests: XCTestCase {
     func test_fnDown_doesNotStartListening_whenAudioCaptureFails() {
         let fakeAudio = FakeAudioCapture()
         fakeAudio.startResult = false
-        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: FakeSpeechTranscriber(), textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: FakeSpeechTranscriber(), textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
 
         controller.handleFnDown()
 
@@ -87,17 +91,40 @@ final class DictationControllerTests: XCTestCase {
         let fakeAudio = FakeAudioCapture()
         fakeAudio.startResult = false
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
 
         controller.handleFnDown()
 
         XCTAssertEqual(fakeSpeech.stopCallCount, 1, "the now-abandoned request must be stopped rather than left dangling")
     }
 
+    func test_fnDown_doesNotStartListening_whenPermissionsAreMissing() {
+        let fakePermissions = FakePermissionsChecker()
+        fakePermissions.canRecord = false
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: FakeSpeechTranscriber(), textTyper: FakeTextTyper(), permissionsChecker: fakePermissions)
+
+        controller.handleFnDown()
+
+        XCTAssertFalse(controller.isListening, "must not report listening when permissions are missing")
+    }
+
+    func test_fnDown_whenPermissionsAreMissing_neverTouchesAudioOrSpeech() {
+        let fakeAudio = FakeAudioCapture()
+        let fakeSpeech = FakeSpeechTranscriber()
+        let fakePermissions = FakePermissionsChecker()
+        fakePermissions.canRecord = false
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: fakePermissions)
+
+        controller.handleFnDown()
+
+        XCTAssertEqual(fakeAudio.startCallCount, 0, "must skip the recording flow entirely, not start-then-abort")
+        XCTAssertEqual(fakeSpeech.startCallCount, 0)
+    }
+
     func test_buffersFromAudioCapture_areForwardedToTheTranscriber() {
         let fakeAudio = FakeAudioCapture()
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
         controller.handleFnDown()
 
         let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)!
@@ -110,7 +137,7 @@ final class DictationControllerTests: XCTestCase {
 
     func test_onFinalCallback_updatesLastTranscript_evenAfterFnUpReturns() {
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
         controller.handleFnDown()
         controller.handleFnUp()
 
@@ -122,7 +149,7 @@ final class DictationControllerTests: XCTestCase {
     func test_fnUp_stopsAudioCaptureAndSpeechTranscriber_andClearsOnBuffer() {
         let fakeAudio = FakeAudioCapture()
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
         controller.handleFnDown()
 
         controller.handleFnUp()
@@ -134,7 +161,7 @@ final class DictationControllerTests: XCTestCase {
 
     func test_fnUp_withoutPriorFnDown_isNoOp() {
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
 
         controller.handleFnUp()
 
@@ -145,7 +172,7 @@ final class DictationControllerTests: XCTestCase {
     func test_rapidRepeatedFnDown_onlyStartsOnce() {
         let fakeAudio = FakeAudioCapture()
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: fakeAudio, speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
 
         controller.handleFnDown()
         controller.handleFnDown()
@@ -157,7 +184,7 @@ final class DictationControllerTests: XCTestCase {
 
     func test_rapidRepeatedFnUp_onlyStopsOnce() {
         let fakeSpeech = FakeSpeechTranscriber()
-        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: FakeTextTyper())
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: FakeTextTyper(), permissionsChecker: FakePermissionsChecker())
         controller.handleFnDown()
 
         controller.handleFnUp()
@@ -172,7 +199,7 @@ final class DictationControllerTests: XCTestCase {
     func test_finalTranscript_isTypedExactlyOnce() {
         let fakeSpeech = FakeSpeechTranscriber()
         let fakeTyper = FakeTextTyper()
-        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: fakeTyper)
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: fakeTyper, permissionsChecker: FakePermissionsChecker())
         controller.handleFnDown()
 
         fakeSpeech.capturedOnFinal?("hello, world.")
@@ -183,7 +210,7 @@ final class DictationControllerTests: XCTestCase {
     func test_emptyFinalTranscript_doesNotCrashThePipeline() {
         let fakeSpeech = FakeSpeechTranscriber()
         let fakeTyper = FakeTextTyper()
-        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: fakeTyper)
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: fakeTyper, permissionsChecker: FakePermissionsChecker())
         controller.handleFnDown()
 
         fakeSpeech.capturedOnFinal?("")
@@ -194,7 +221,7 @@ final class DictationControllerTests: XCTestCase {
     func test_backToBackUtterances_eachTypeOnlyTheirOwnTranscript() {
         let fakeSpeech = FakeSpeechTranscriber()
         let fakeTyper = FakeTextTyper()
-        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: fakeTyper)
+        let controller = DictationController(audioCapture: FakeAudioCapture(), speechTranscriber: fakeSpeech, textTyper: fakeTyper, permissionsChecker: FakePermissionsChecker())
 
         controller.handleFnDown()
         controller.handleFnUp()
