@@ -15,7 +15,7 @@ struct MumbleApp: App {
     private let hotkeyMonitor = HotkeyMonitor()
 
     var body: some Scene {
-        MenuBarExtra("Mumble", systemImage: dictationController.isListening ? "mic.fill" : "mic") {
+        MenuBarExtra {
             Button("Permissions…") {
                 PermissionsStatus.openAccessibilitySettings()
             }
@@ -26,12 +26,32 @@ struct MumbleApp: App {
                 NSApplication.shared.terminate(nil)
             }
             .keyboardShortcut("q")
+        } label: {
+            // The label is the part of MenuBarExtra that's rendered eagerly
+            // at launch (unlike the menu content, which only materializes
+            // once clicked), so onAppear here is the earliest point where
+            // `dictationController` is guaranteed to be the real,
+            // SwiftUI-installed @StateObject instance rather than a
+            // throwaway one - see wireHotkeyMonitor()'s doc comment.
+            Image(systemName: dictationController.isListening ? "mic.fill" : "mic")
+                .onAppear { wireHotkeyMonitor() }
         }
     }
 
     init() {
         PermissionsStatus.logCurrentStatus()
+    }
 
+    /// Deliberately NOT called from init(): reading a @StateObject's
+    /// wrapped value inside init() runs before SwiftUI has installed it,
+    /// which silently hands back a throwaway instance instead of the one
+    /// `body` observes - confirmed by a real "Accessing StateObject's
+    /// object without being installed on a View" runtime warning, which
+    /// traced to the menu-bar icon never updating (HotkeyMonitor was
+    /// driving a different DictationController than the one body
+    /// rendered). Calling this from the label's onAppear instead
+    /// guarantees `dictationController` is the real, installed instance.
+    private func wireHotkeyMonitor() {
         let controller = dictationController
         hotkeyMonitor.onFnDown = { controller.handleFnDown() }
         hotkeyMonitor.onFnUp = { controller.handleFnUp() }
