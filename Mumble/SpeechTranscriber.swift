@@ -11,6 +11,23 @@ protocol SpeechTranscribing: AnyObject {
     func stop()
 }
 
+/// Tags each recognition cycle so a callback from an abandoned previous
+/// cycle can never be mistaken for the current one. Reused across rapid
+/// Fn up/down taps, where a new cycle can start before the old cycle's
+/// task has delivered its (now-irrelevant) final callback.
+struct RecognitionCycleTracker {
+    private(set) var generation = 0
+
+    mutating func begin() -> Int {
+        generation += 1
+        return generation
+    }
+
+    func isCurrent(_ token: Int) -> Bool {
+        token == generation
+    }
+}
+
 final class SpeechTranscriber: SpeechTranscribing {
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private var request: SFSpeechAudioBufferRecognitionRequest?
@@ -18,8 +35,13 @@ final class SpeechTranscriber: SpeechTranscribing {
     private var latestTranscript = ""
     private var onFinal: ((String) -> Void)?
     private var didFinish = false
+    private var cycleTracker = RecognitionCycleTracker()
 
     func start(onUpdate: @escaping (String) -> Void, onFinal: @escaping (String) -> Void) {
+        // Abandon any still-running previous cycle before starting a new one.
+        task?.cancel()
+        let currentCycle = cycleTracker.begin()
+
         guard let recognizer = recognizer, recognizer.isAvailable else {
             print("SpeechTranscriber: recognizer unavailable")
             onFinal("")
@@ -38,7 +60,11 @@ final class SpeechTranscriber: SpeechTranscribing {
         self.onFinal = onFinal
 
         task = recognizer.recognitionTask(with: newRequest) { [weak self] result, error in
-            guard let self else { return }
+            guard let self, self.cycleTracker.isCurrent(currentCycle) else {
+                // Stale callback from an abandoned cycle - ignore it rather
+                // than let it corrupt (or short-circuit) the current cycle.
+                return
+            }
 
             if let result {
                 self.latestTranscript = result.bestTranscription.formattedString

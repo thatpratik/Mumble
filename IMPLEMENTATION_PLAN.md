@@ -164,17 +164,21 @@ The raw on-device path is never blocked or replaced by a slow/failed network cal
 
 ---
 
-## Phase 6 — Typing the result into the focused app — Not started
+## Phase 6 — Typing the result into the focused app — Code done, manual verification pending
 
 **Goal of this phase:** the final transcript from Phase 5 gets physically typed into whatever app the user was looking at — the actual "magic" of the product, and the point at which the raw dictation loop is feature-complete.
 
-45. **Write a `typeText(_ text: String)` function** using `CGEvent(keyboardEventSource:virtualKey:keyDown:)` with `CGEventKeyboardSetUnicodeString` to post each character as a synthetic keystroke to the system (not to a specific app — it goes to whatever has focus).
-46. **Guard the function on `AXIsProcessTrusted()`** — if false, skip typing and log a warning instead of silently failing.
-47. **Test `typeText` in isolation** first: call it directly with a hardcoded string (e.g. from a temporary debug menu item) while TextEdit is focused. Verify: the exact string appears in TextEdit.
-48. **Wire the real pipeline**: when the recognition task in Phase 5 delivers its final result on Fn UP, call `typeText(finalTranscript)` instead of just logging it.
-49. **Test the full loop end-to-end**: focus TextEdit, hold Fn, say a sentence, release Fn. Verify: the spoken sentence appears typed into TextEdit.
-50. **Test in at least two other contexts**: a code editor (e.g. Xcode's own editor or VS Code) and Terminal. Verify: text is typed correctly in both — this is the real proof the Accessibility-API approach works everywhere, unlike clipboard paste.
-51. **Remove the temporary debug menu item** from step 47. Commit this checkpoint ("MVP core loop complete: Fn hold → speech → typed text").
+45. **Write a `typeText(_ text: String)` function** using `CGEvent(keyboardEventSource:virtualKey:keyDown:)` with `CGEventKeyboardSetUnicodeString` to post each character as a synthetic keystroke to the system (not to a specific app — it goes to whatever has focus). — Done: `Mumble/TextTyper.swift`, behind a `TextTyping` protocol. Posts each `Character` (grapheme cluster, not raw Unicode scalar) as one synthetic keystroke via `keyboardSetUnicodeString`, so multi-scalar characters still post correctly as a single keystroke.
+46. **Guard the function on `AXIsProcessTrusted()`** — if false, skip typing and log a warning instead of silently failing. — Done.
+47. **Test `typeText` in isolation** first via a temporary debug menu item. — **Skipped deliberately**: this environment has no way to interactively use a debug menu item (no Xcode — see Phase 3b/4/5), so adding one just to remove it again in the same sitting would be pure churn with no verification benefit. Went straight to the real pipeline (step 48); isolation testing folds into the end-to-end manual test below.
+48. **Wire the real pipeline**: when the recognition task in Phase 5 delivers its final result on Fn UP, call `typeText(finalTranscript)` instead of just logging it. — Done: `DictationController`'s `onFinal` closure now calls `textTyper.type(transcript)` after updating `lastTranscript`.
+49. **Test the full loop end-to-end**: focus TextEdit, hold Fn, say a sentence, release Fn. Verify: the spoken sentence appears typed into TextEdit. — **Not yet done** — needs Xcode + real hardware, same gap as Phases 4/5.
+50. **Test in at least two other contexts**: a code editor and Terminal. — **Not yet done**, same gap.
+51. **Remove the temporary debug menu item.** — N/A, none was added (see step 47). Commit this checkpoint ("MVP core loop complete: Fn hold → speech → typed text").
+
+**Verified in this environment** (executable `swiftc` harness against the real sources, plus matching `MumbleTests/DictationControllerTests.swift` cases): final transcript is typed exactly once with the exact string; an empty final transcript flows through without crashing; back-to-back utterances each type only their own transcript. That last case surfaced a real bug while implementing this phase — see the `SpeechTranscriber` note below.
+
+**Bug found and fixed before this commit (not in the original plan, found by working through negative scenarios):** `SpeechTranscriber` is a single long-lived instance reused across every Fn tap. `DictationController.isListening` flips back to `false` as soon as `handleFnUp()` runs — it does *not* wait for the previous utterance's recognition task to actually finish delivering its asynchronous final result. That means a quick Fn-up-then-Fn-down could start a *new* recognition cycle while the *old* cycle's task was still pending; the old task's late callback would then fire into the new cycle's `onFinal`/`didFinish` state (wrong transcript typed, or the real new transcript silently dropped). Fixed with `RecognitionCycleTracker`, a small generation counter: each `start()` call cancels the previous task and stamps a new "current cycle" token that the recognition callback checks before touching any shared state; a stale callback from an abandoned cycle is now discarded instead of corrupting the next one. `RecognitionCycleTracker` has no dependency on `Speech`/`AVFoundation`, so unlike the rest of this class it's fully unit-tested (see `RecognitionCycleTrackerTests`), not just manually reasoned through.
 
 ---
 

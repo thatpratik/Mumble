@@ -11,13 +11,16 @@ final class DictationController {
 
     private let audioCapture: AudioCapturing
     private let speechTranscriber: SpeechTranscribing
+    private let textTyper: TextTyping
 
     init(
         audioCapture: AudioCapturing = AudioCapture(),
-        speechTranscriber: SpeechTranscribing = SpeechTranscriber()
+        speechTranscriber: SpeechTranscribing = SpeechTranscriber(),
+        textTyper: TextTyping = TextTyper()
     ) {
         self.audioCapture = audioCapture
         self.speechTranscriber = speechTranscriber
+        self.textTyper = textTyper
     }
 
     func handleFnDown() {
@@ -30,6 +33,7 @@ final class DictationController {
             onFinal: { [weak self] transcript in
                 self?.lastTranscript = transcript
                 print("Transcript (final): \(transcript)")
+                self?.textTyper.type(transcript)
             }
         )
 
