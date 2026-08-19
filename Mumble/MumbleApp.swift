@@ -11,21 +11,13 @@ import Speech
 
 @main
 struct MumbleApp: App {
-    @StateObject private var dictationController = DictationController()
+    @StateObject private var transcriptHistory: TranscriptHistoryStore
+    @StateObject private var dictationController: DictationController
     private let hotkeyMonitor = HotkeyMonitor()
 
     var body: some Scene {
         MenuBarExtra {
-            Button("Permissions…") {
-                PermissionsStatus.openAccessibilitySettings()
-            }
-
-            Divider()
-
-            Button("Quit Mumble") {
-                NSApplication.shared.terminate(nil)
-            }
-            .keyboardShortcut("q")
+            MenuContent()
         } label: {
             // The label is the part of MenuBarExtra that's rendered eagerly
             // at launch (unlike the menu content, which only materializes
@@ -36,10 +28,19 @@ struct MumbleApp: App {
             Image(systemName: dictationController.isListening ? "mic.fill" : "mic")
                 .onAppear { wireHotkeyMonitor() }
         }
+
+        Window("Mumble History", id: "history") {
+            HistoryView()
+                .environmentObject(transcriptHistory)
+        }
     }
 
     init() {
+        let history = TranscriptHistoryStore()
+        _transcriptHistory = StateObject(wrappedValue: history)
+        _dictationController = StateObject(wrappedValue: DictationController(transcriptHistory: history))
         PermissionsStatus.logCurrentStatus()
+        PermissionsStatus.requestPermissionsIfNeeded()
     }
 
     /// Deliberately NOT called from init(): reading a @StateObject's
@@ -59,6 +60,35 @@ struct MumbleApp: App {
     }
 }
 
+/// Menu content lives in its own view (rather than inline in MumbleApp's
+/// MenuBarExtra) so it can read @Environment(\.openWindow) - that key is
+/// only populated inside a View's environment, not on the App/Scene itself.
+struct MenuContent: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Button("Show History…") {
+            // LSUIElement apps have no Dock icon, so openWindow alone can
+            // create the window without ever bringing it in front of
+            // whatever app currently has focus - it "opens" but is easy to
+            // never actually see. Activating the app first forces it forward.
+            NSApp.activate(ignoringOtherApps: true)
+            openWindow(id: "history")
+        }
+
+        Button("Permissions…") {
+            PermissionsStatus.openAccessibilitySettings()
+        }
+
+        Divider()
+
+        Button("Quit Mumble") {
+            NSApplication.shared.terminate(nil)
+        }
+        .keyboardShortcut("q")
+    }
+}
+
 enum PermissionsStatus {
     static func logCurrentStatus() {
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -72,6 +102,27 @@ enum PermissionsStatus {
         Accessibility trusted: \(accessibilityTrusted)
         ---------------------------
         """)
+    }
+
+    /// Phase 2 (steps 17-18) only ever triggered these via throwaway debug
+    /// buttons that were removed once verified - nothing replaced them in
+    /// the real flow, so canRecord's permission check had nothing to ever
+    /// move either status past .notDetermined. requestAccess/
+    /// requestAuthorization are safe to call every launch: once a status is
+    /// already .authorized or .denied, the OS answers immediately without
+    /// showing a dialog again, so this only actually prompts the user once.
+    static func requestPermissionsIfNeeded() {
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { granted in
+                print("Microphone permission request resolved: \(granted ? "granted" : "denied")")
+            }
+        }
+
+        if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
+            SFSpeechRecognizer.requestAuthorization { status in
+                print("Speech recognition permission request resolved: \(status.description)")
+            }
+        }
     }
 
     /// Opens straight to the Accessibility pane rather than System Settings'

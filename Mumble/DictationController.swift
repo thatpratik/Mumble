@@ -14,17 +14,20 @@ final class DictationController: ObservableObject {
     private let speechTranscriber: SpeechTranscribing
     private let textTyper: TextTyping
     private let permissionsChecker: PermissionsChecking
+    private let transcriptHistory: TranscriptHistoryRecording
 
     init(
         audioCapture: AudioCapturing = AudioCapture(),
         speechTranscriber: SpeechTranscribing = SpeechTranscriber(),
         textTyper: TextTyping = TextTyper(),
-        permissionsChecker: PermissionsChecking = PermissionsChecker()
+        permissionsChecker: PermissionsChecking = PermissionsChecker(),
+        transcriptHistory: TranscriptHistoryRecording = TranscriptHistoryStore()
     ) {
         self.audioCapture = audioCapture
         self.speechTranscriber = speechTranscriber
         self.textTyper = textTyper
         self.permissionsChecker = permissionsChecker
+        self.transcriptHistory = transcriptHistory
     }
 
     func handleFnDown() {
@@ -42,6 +45,7 @@ final class DictationController: ObservableObject {
                 self?.lastTranscript = transcript
                 print("Transcript (final): \(transcript)")
                 self?.textTyper.type(transcript)
+                self?.transcriptHistory.record(transcript)
             }
         )
 

@@ -23,7 +23,7 @@ The scope below described the original offline-only MVP. That MVP is still being
 
 # Open questions
 
-- Whether there's any UI beyond the menu-bar icon (e.g. a settings window, a listening-state indicator/HUD) — first native settings surface is now planned in `IMPLEMENTATION_PLAN.md` Phase 9 (Context Engine).
+- Whether there's any UI beyond the menu-bar icon (e.g. a settings window, a listening-state indicator/HUD) — a minimal Transcript History window was added ahead of schedule (see `IMPLEMENTATION_PLAN.md`'s Phase 6b addition, 2026-08-19) so dictation has some visible/persistent proof of working; a fuller native settings surface (per-app opt-outs, preferences) is still planned in Phase 9.
 - Distribution: local dev build only vs. a notarized app — deferred until distributing to more than one user is relevant (see `IMPLEMENTATION_PLAN.md`'s deferred packaging note).
 - Behavior when `SFSpeechRecognizer` misrecognizes speech or is unavailable (e.g. offline speech model not downloaded) — silent failure vs. a visible error/indicator; partially addressed by `IMPLEMENTATION_PLAN.md` Phase 6b's guard rails, but full graceful-degradation behavior isn't finalized.
 
